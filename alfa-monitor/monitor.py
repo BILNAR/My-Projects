@@ -11,6 +11,7 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -99,13 +100,25 @@ def browser_html(url):
             user_agent=HEADERS["User-Agent"],
             viewport={"width": 1440, "height": 1000},
             locale="ru-RU",
+            extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en;q=0.7"},
         )
         page = context.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.goto(url, wait_until="commit", timeout=60000)
 
         html = ""
-        for second in range(0, 31, 2):
-            html = page.content()
+        for second in range(0, 47, 2):
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=4000)
+            except PlaywrightError:
+                pass
+
+            try:
+                html = page.content()
+            except PlaywrightError as e:
+                print(f"BROWSER +{second:02d}s navigation in progress: {e}")
+                page.wait_for_timeout(2000)
+                continue
+
             challenge = is_challenge_html(html)
             print(
                 f"BROWSER +{second:02d}s url={page.url} bytes={len(html.encode('utf-8'))} challenge={challenge}"
@@ -114,11 +127,25 @@ def browser_html(url):
                 break
             page.wait_for_timeout(2000)
 
+        # One last stable read after redirects/challenge navigation.
+        for _ in range(5):
+            try:
+                page.wait_for_timeout(1000)
+                html = page.content()
+                break
+            except PlaywrightError:
+                continue
+
         final_url = page.url
-        title = page.title()
+        try:
+            title = page.title()
+        except PlaywrightError:
+            title = ""
         print(f"BROWSER FINAL: {final_url}")
         print(f"BROWSER TITLE: {title}")
-        if is_challenge_html(html):
+        print(f"BROWSER FINAL BYTES: {len(html.encode('utf-8')) if html else 0}")
+        print(f"BROWSER FINAL CHALLENGE: {is_challenge_html(html) if html else True}")
+        if html and is_challenge_html(html):
             preview = re.sub(r"\s+", " ", html).strip()[:1800]
             print("BROWSER STILL ON CHALLENGE. BODY PREVIEW:")
             print(preview)
