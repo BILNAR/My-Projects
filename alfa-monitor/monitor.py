@@ -72,8 +72,6 @@ def clean_url(url):
 
 
 def fetch(url, timeout=45):
-    # Alfa's public infrastructure can use certificate chains that are not
-    # trusted by every runner. We disable verification only for allowlisted hosts.
     if not is_allowed(url):
         raise ValueError(f"Host not allowed: {url}")
     return requests.get(url, headers=HEADERS, timeout=timeout, verify=False, allow_redirects=True)
@@ -145,7 +143,6 @@ def inspect_pdf(url, meta):
         "last_modified": r.headers.get("Last-Modified", ""),
         "content_type": r.headers.get("Content-Type", ""),
         "dates": extract_dates(text),
-        "text_sample": text[:1200],
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
