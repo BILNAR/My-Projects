@@ -11,6 +11,7 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+from playwright.sync_api import sync_playwright
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -77,33 +78,89 @@ def fetch(url, timeout=45):
     return requests.get(url, headers=HEADERS, timeout=timeout, verify=False, allow_redirects=True)
 
 
+def is_challenge_html(text):
+    low = text.lower()
+    return (
+        "servicepipe.tech" in low
+        or "js-challenge-loader" in low
+        or "id_captcha_frame_div" in low
+    )
+
+
+def browser_html(url):
+    print(f"BROWSER FALLBACK: {url}")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-dev-shm-usage"],
+        )
+        context = browser.new_context(
+            ignore_https_errors=True,
+            user_agent=HEADERS["User-Agent"],
+            viewport={"width": 1440, "height": 1000},
+            locale="ru-RU",
+        )
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+        html = ""
+        for second in range(0, 31, 2):
+            html = page.content()
+            challenge = is_challenge_html(html)
+            print(
+                f"BROWSER +{second:02d}s url={page.url} bytes={len(html.encode('utf-8'))} challenge={challenge}"
+            )
+            if not challenge and len(html) > 5000:
+                break
+            page.wait_for_timeout(2000)
+
+        final_url = page.url
+        title = page.title()
+        print(f"BROWSER FINAL: {final_url}")
+        print(f"BROWSER TITLE: {title}")
+        if is_challenge_html(html):
+            preview = re.sub(r"\s+", " ", html).strip()[:1800]
+            print("BROWSER STILL ON CHALLENGE. BODY PREVIEW:")
+            print(preview)
+
+        context.close()
+        browser.close()
+        return html, final_url
+
+
 def discover_from_page(page_url):
     r = fetch(page_url)
     print(f"SOURCE {page_url} -> HTTP {r.status_code}, {len(r.content)} bytes")
     print(f"FINAL URL: {r.url}")
     print(f"CONTENT-TYPE: {r.headers.get('Content-Type', '')}")
-    print(f"SERVER: {r.headers.get('Server', '')}")
     r.raise_for_status()
 
+    text = r.text
+    effective_url = r.url
+
+    if is_challenge_html(text):
+        text, effective_url = browser_html(page_url)
+
     found = {}
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(text, "html.parser")
 
     for a in soup.find_all("a", href=True):
-        absolute = clean_url(urljoin(page_url, a["href"]))
+        absolute = clean_url(urljoin(effective_url, a["href"]))
         if ".pdf" in absolute.lower() and is_allowed(absolute):
             found[absolute] = {
                 "title": " ".join(a.stripped_strings).strip(),
                 "source": page_url,
             }
 
-    raw = clean_url(r.text)
+    raw = clean_url(text)
     for match in PDF_RE.findall(raw):
         match = clean_url(match)
         if is_allowed(match):
             found.setdefault(match, {"title": "", "source": page_url})
 
+    print(f"PDF ON SOURCE: {len(found)}")
     if not found:
-        preview = re.sub(r"\s+", " ", r.text).strip()[:1800]
+        preview = re.sub(r"\s+", " ", text).strip()[:1800]
         print("NO PDF ON SOURCE. BODY PREVIEW:")
         print(preview)
 
@@ -139,6 +196,10 @@ def inspect_pdf(url, meta):
     r = fetch(url, timeout=60)
     r.raise_for_status()
     data = r.content
+    if not data.startswith(b"%PDF"):
+        raise RuntimeError(
+            f"Expected PDF, got {r.headers.get('Content-Type', '')}, {len(data)} bytes"
+        )
     text = pdf_text(data)
 
     return {
