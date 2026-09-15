@@ -16,7 +16,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -28,7 +28,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r alfa-monitor/requirements.txt
+        run: |
+          pip install -r alfa-monitor/requirements.txt
+          python -m playwright install --with-deps chromium
 
       - name: Run monitor
         env:
