@@ -1,0 +1,50 @@
+name: Alfa Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:00 and 15:00 Ufa (UTC+5) = 04:00 and 10:00 UTC
+    - cron: "0 4,10 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alfa-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r alfa-monitor/requirements.txt
+
+      - name: Run monitor
+        env:
+          ALFA_RELAY_URL: ${{ secrets.ALFA_RELAY_URL }}
+          ALFA_RELAY_KEY: ${{ secrets.ALFA_RELAY_KEY }}
+        run: python alfa-monitor/monitor.py
+
+      - name: Save state
+        run: |
+          if git diff --quiet -- alfa-monitor/state.json; then
+            echo "State unchanged"
+            exit 0
+          fi
+
+          git config user.name "alfa-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add alfa-monitor/state.json
+          git commit -m "Update Alfa Monitor state"
+          git push
