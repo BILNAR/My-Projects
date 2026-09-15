@@ -80,6 +80,9 @@ def fetch(url, timeout=45):
 def discover_from_page(page_url):
     r = fetch(page_url)
     print(f"SOURCE {page_url} -> HTTP {r.status_code}, {len(r.content)} bytes")
+    print(f"FINAL URL: {r.url}")
+    print(f"CONTENT-TYPE: {r.headers.get('Content-Type', '')}")
+    print(f"SERVER: {r.headers.get('Server', '')}")
     r.raise_for_status()
 
     found = {}
@@ -98,6 +101,11 @@ def discover_from_page(page_url):
         match = clean_url(match)
         if is_allowed(match):
             found.setdefault(match, {"title": "", "source": page_url})
+
+    if not found:
+        preview = re.sub(r"\s+", " ", r.text).strip()[:1800]
+        print("NO PDF ON SOURCE. BODY PREVIEW:")
+        print(preview)
 
     return found
 
